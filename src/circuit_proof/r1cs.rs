@@ -23,23 +23,16 @@ pub enum Variable {
 }
 
 #[derive(Clone)]
-pub enum Commitments {
-    Open(Vec<Scalar>, Vec<Scalar>, PedersenGenerators),
-    Closed(Vec<RistrettoPoint>),
+pub enum Commitment {
+    Open(Scalar, Scalar), // v, v_blinding
+    Closed(RistrettoPoint),
 }
 
-impl Commitments {
-    pub fn close(&self) -> Vec<RistrettoPoint> {
+impl Commitment {
+    pub fn close(&self, pedersen_gens: &PedersenGenerators) -> RistrettoPoint {
         match self {
-            Commitments::Open(v, v_blinding, pedersen_gens) => {
-                let V = v
-                    .iter()
-                    .zip(v_blinding)
-                    .map(|(v_i, v_blinding_i)| pedersen_gens.commit(*v_i, *v_blinding_i))
-                    .collect();
-                return V;
-            }
-            Commitments::Closed(V) => return V.clone(),
+            Commitment::Open(v, v_blinding) => return pedersen_gens.commit(*v, *v_blinding),
+            Commitment::Closed(V) => return *V,
         }
     }
 }
@@ -91,7 +84,7 @@ pub struct ConstraintSystem<'a> {
 }
 
 impl<'a> ConstraintSystem<'a> {
-    pub fn new(transcript: &'a mut Transcript, commitments: Commitments) -> (Self, Vec<Variable>) {
+    pub fn new(transcript: &'a mut Transcript, commitments: Vec<Commitment>, pedersen_gens: &PedersenGenerators) -> (Self, Vec<Variable>) {
         let mut cs = ConstraintSystem {
             transcript,
             constraints: vec![],
@@ -102,26 +95,20 @@ impl<'a> ConstraintSystem<'a> {
         };
         let mut variables = vec![];
 
-        let closed_commitments = match commitments.clone() {
-            Commitments::Open(v, _, _) => {
-                for v_i in v {
-                    variables.push(cs.assign_committed(Assignment::from(v_i)));
+        for commitment in commitments {
+            match commitment {
+                Commitment::Open(v, _) => {
+                    variables.push(cs.assign_committed(Assignment::from(v)));
+                    let V = commitment.close(pedersen_gens);
+                    cs.transcript.commit_point(b"Initializing ConstraintSystem", &V.compress());
                 }
-                commitments.close()
-            }
-            Commitments::Closed(V) => {
-                for _ in 0..V.len() {
+                Commitment::Closed(V) => {
                     variables.push(cs.assign_committed(Assignment::Missing()));
+                    cs.transcript.commit_point(b"Initializing ConstraintSystem", &V.compress());
                 }
-                V
             }
-        };
-
-        for cc in closed_commitments {
-            cs.transcript
-                .commit_point(b"Initializing ConstraintSystem", &cc.compress());
         }
-
+        
         (cs, variables)
     }
 
