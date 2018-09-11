@@ -84,7 +84,11 @@ pub struct ConstraintSystem<'a> {
 }
 
 impl<'a> ConstraintSystem<'a> {
-    pub fn new(transcript: &'a mut Transcript, commitments: Vec<Commitment>, pedersen_gens: &PedersenGenerators) -> (Self, Vec<Variable>) {
+    pub fn new(
+        transcript: &'a mut Transcript,
+        commitments: Vec<Commitment>,
+        pedersen_gens: &PedersenGenerators,
+    ) -> (Self, Vec<Variable>) {
         let mut cs = ConstraintSystem {
             transcript,
             constraints: vec![],
@@ -96,25 +100,25 @@ impl<'a> ConstraintSystem<'a> {
         let mut variables = vec![];
 
         for commitment in commitments {
-            match commitment {
+            let V = match commitment {
                 Commitment::Open(v, _) => {
                     variables.push(cs.assign_committed(Assignment::from(v)));
-                    let V = commitment.close(pedersen_gens);
-                    cs.transcript.commit_point(b"Initializing ConstraintSystem", &V.compress());
+                    commitment.close(pedersen_gens)
                 }
                 Commitment::Closed(V) => {
                     variables.push(cs.assign_committed(Assignment::Missing()));
-                    cs.transcript.commit_point(b"Initializing ConstraintSystem", &V.compress());
+                    V
                 }
-            }
+            };
+            cs.transcript
+                .commit_point(b"Initializing ConstraintSystem", &V.compress());
         }
-        
+
         (cs, variables)
     }
 
     pub fn prover_new(
         transcript: &'a mut Transcript,
-        // TODO: encapsulate v, v_blinding, pedersen_gens into one "commitment" struct
         v: Vec<Scalar>,
         v_blinding: Vec<Scalar>,
         pedersen_gens: PedersenGenerators,
