@@ -22,6 +22,28 @@ pub enum Variable {
     MultiplierOutput(usize), // low-level variable, output multiplication gate
 }
 
+#[derive(Clone)]
+pub enum Commitments {
+    Open(Vec<Scalar>, Vec<Scalar>, PedersenGenerators),
+    Closed(Vec<RistrettoPoint>),
+}
+
+impl Commitments {
+    pub fn close(&self) -> Vec<RistrettoPoint> {
+        match self {
+            Commitments::Open(v, v_blinding, pedersen_gens) => {
+                let V = v
+                    .iter()
+                    .zip(v_blinding)
+                    .map(|(v_i, v_blinding_i)| pedersen_gens.commit(*v_i, *v_blinding_i))
+                    .collect();
+                return V;
+            }
+            Commitments::Closed(V) => return V.clone(),
+        }
+    }
+}
+
 /// Represents a linear combination of some variables multiplied with their scalar coefficients,
 /// plus a scalar. `ConstraintSystem` expects all linear combinations to evaluate to zero.
 /// E.g. LC = variable[0]*scalar[0] + variable[1]*scalar[1] + scalar
@@ -69,6 +91,40 @@ pub struct ConstraintSystem<'a> {
 }
 
 impl<'a> ConstraintSystem<'a> {
+    pub fn new(transcript: &'a mut Transcript, commitments: Commitments) -> (Self, Vec<Variable>) {
+        let mut cs = ConstraintSystem {
+            transcript,
+            constraints: vec![],
+            aL_assignments: vec![],
+            aR_assignments: vec![],
+            aO_assignments: vec![],
+            v_assignments: vec![],
+        };
+        let mut variables = vec![];
+
+        let closed_commitments = match commitments.clone() {
+            Commitments::Open(v, _, _) => {
+                for v_i in v {
+                    variables.push(cs.assign_committed(Assignment::from(v_i)));
+                }
+                commitments.close()
+            }
+            Commitments::Closed(V) => {
+                for _ in 0..V.len() {
+                    variables.push(cs.assign_committed(Assignment::Missing()));
+                }
+                V
+            }
+        };
+
+        for cc in closed_commitments {
+            cs.transcript
+                .commit_point(b"Initializing ConstraintSystem", &cc.compress());
+        }
+
+        (cs, variables)
+    }
+
     pub fn prover_new(
         transcript: &'a mut Transcript,
         // TODO: encapsulate v, v_blinding, pedersen_gens into one "commitment" struct
