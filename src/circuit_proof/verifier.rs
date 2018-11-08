@@ -8,7 +8,7 @@ use merlin::Transcript;
 use super::assignment::Assignment;
 use super::{ConstraintSystem, LinearCombination, R1CSProof, Variable};
 
-use errors::R1CSError;
+use errors::{R1CSError, ProofError};
 use generators::{BulletproofGens, PedersenGens};
 use transcript::TranscriptProtocol;
 
@@ -188,7 +188,7 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     }
 
     /// Consume this `VerifierCS` and attempt to verify the supplied `proof`.
-    pub fn verify(mut self, proof: &R1CSProof) -> Result<(), R1CSError> {
+    pub fn verify(mut self, proof: &R1CSProof) -> Result<(), ProofError> {
         // If the number of multiplications is not 0 or a power of 2, then pad the circuit.
         let n = self.num_vars;
         let padded_n = self.num_vars.next_power_of_two();
@@ -199,7 +199,7 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         use util;
 
         if self.bp_gens.gens_capacity < padded_n {
-            return Err(R1CSError::InvalidGeneratorsLength);
+            return Err(ProofError::InvalidGeneratorsLength);
         }
         // We are performing a single-party circuit proof, so party index is 0.
         let gens = self.bp_gens.share(0);
@@ -230,7 +230,7 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         let (wL, wR, wO, wV, wc) = self.flattened_constraints(&z);
 
         // Get IPP variables
-        let (u_sq, u_inv_sq, s) = proof.ipp_proof.verification_scalars(self.transcript);
+        let (u_sq, u_inv_sq, s) = proof.ipp_proof.verification_scalars(padded_n, self.transcript)?;
 
         let a = proof.ipp_proof.a;
         let b = proof.ipp_proof.b;
@@ -302,12 +302,12 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
                 .chain(proof.ipp_proof.L_vec.iter().map(|L_i| L_i.decompress()))
                 .chain(proof.ipp_proof.R_vec.iter().map(|R_i| R_i.decompress())),
         )
-        .ok_or_else(|| R1CSError::VerificationError)?;
+        .ok_or_else(|| ProofError::VerificationError)?;
 
         use curve25519_dalek::traits::IsIdentity;
 
         if !mega_check.is_identity() {
-            return Err(R1CSError::VerificationError);
+            return Err(ProofError::VerificationError);
         }
 
         Ok(())
